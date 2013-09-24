@@ -21,6 +21,7 @@
 - (BOOL)processCategories:(NSError **)error;
 - (BOOL)processProtocols:(NSError **)error;
 - (BOOL)processDocuments:(NSError **)error;
+- (BOOL)processConstants:(NSError **)error;
 - (BOOL)processIndex:(NSError **)error;
 - (BOOL)processHierarchy:(NSError **)error;
 - (NSString *)stringByCleaningHtml:(NSString *)string;
@@ -49,6 +50,7 @@
 	if (![self processCategories:error]) return NO;
 	if (![self processProtocols:error]) return NO;
 	if (![self processDocuments:error]) return NO;
+    if (![self processConstants:error]) return NO;
 	if (![self processIndex:error]) return NO;
 	if (![self processHierarchy:error]) return NO;
 	return YES;
@@ -63,7 +65,7 @@
 		NSString *cleaned = [self stringByCleaningHtml:output];
 		NSString *path = [self htmlOutputPathForObject:class];
 		if (![self writeString:cleaned toFile:[path stringByStandardizingPath] error:error]) {
-			GBLogWarn(@"Failed writting HTML for class %@ to '%@'!", class, path);
+			GBLogWarn(@"Failed writing HTML for class %@ to '%@'!", class, path);
 			return NO;
 		}
 		GBLogDebug(@"Finished generating output for class %@.", class);
@@ -80,7 +82,7 @@
 		NSString *cleaned = [self stringByCleaningHtml:output];
 		NSString *path = [self htmlOutputPathForObject:category];
 		if (![self writeString:cleaned toFile:[path stringByStandardizingPath] error:error]) {
-			GBLogWarn(@"Failed writting HTML for category %@ to '%@'!", category, path);
+			GBLogWarn(@"Failed writing HTML for category %@ to '%@'!", category, path);
 			return NO;
 		}
 		GBLogDebug(@"Finished generating output for category %@.", category);
@@ -97,10 +99,27 @@
 		NSString *cleaned = [self stringByCleaningHtml:output];
 		NSString *path = [self htmlOutputPathForObject:protocol];
 		if (![self writeString:cleaned toFile:[path stringByStandardizingPath] error:error]) {
-			GBLogWarn(@"Failed writting HTML for protocol %@ to '%@'!", protocol, path);
+			GBLogWarn(@"Failed writing HTML for protocol %@ to '%@'!", protocol, path);
 			return NO;
 		}
 		GBLogDebug(@"Finished generating output for protocol %@.", protocol);
+	}
+	return YES;
+}
+
+- (BOOL)processConstants:(NSError **)error {
+	for (GBTypedefEnumData *enumTypedef in self.store.constants) {
+        if (!enumTypedef.includeInOutput) continue;
+		GBLogInfo(@"Generating output for protocol %@...", enumTypedef);
+		NSDictionary *vars = [self.variablesProvider variablesForConstant:enumTypedef withStore:self.store];
+		NSString *output = [self.htmlObjectTemplate renderObject:vars];
+		NSString *cleaned = [self stringByCleaningHtml:output];
+		NSString *path = [self htmlOutputPathForObject:enumTypedef];
+		if (![self writeString:cleaned toFile:[path stringByStandardizingPath] error:error]) {
+			GBLogWarn(@"Failed writing HTML for constant %@ to '%@'!", enumTypedef, path);
+			return NO;
+		}
+		GBLogDebug(@"Finished generating output for constant %@.", enumTypedef);
 	}
 	return YES;
 }
@@ -126,7 +145,7 @@
 		NSString *cleaned = [self stringByCleaningHtml:output];
 		NSString *path = [self htmlOutputPathForObject:document];
 		if (![self writeString:cleaned toFile:[path stringByStandardizingPath] error:error]) {
-			GBLogWarn(@"Failed writting HTML for document %@ to '%@'!", document, path);
+			GBLogWarn(@"Failed writing HTML for document %@ to '%@'!", document, path);
 			return NO;
 		}
 		GBLogDebug(@"Finished generating output for document %@.", document);
@@ -136,13 +155,13 @@
 
 - (BOOL)processIndex:(NSError **)error {
 	GBLogInfo(@"Generating output for index...");
-	if ([self.store.classes count] > 0 || [self.store.protocols count] > 0 || [self.store.categories count] > 0) {
+	if ([self.store.classes count] > 0 || [self.store.protocols count] > 0 || [self.store.categories count] > 0 || [self.store.constants count] > 0) {
 		NSDictionary *vars = [self.variablesProvider variablesForIndexWithStore:self.store];
 		NSString *output = [self.htmlIndexTemplate renderObject:vars];
 		NSString *cleaned = [self stringByCleaningHtml:output];
 		NSString *path = [[self htmlOutputPathForIndex] stringByStandardizingPath];
 		if (![self writeString:cleaned toFile:[path stringByStandardizingPath] error:error]) {
-			GBLogWarn(@"Failed writting HTML index to '%@'!", path);
+			GBLogWarn(@"Failed writing HTML index to '%@'!", path);
 			return NO;
 		}
 	}
@@ -152,13 +171,13 @@
 
 - (BOOL)processHierarchy:(NSError **)error {
 	GBLogInfo(@"Generating output for hierarchy...");
-	if ([self.store.classes count] > 0 || [self.store.protocols count] > 0 || [self.store.categories count] > 0) {
+	if ([self.store.classes count] > 0 || [self.store.protocols count] > 0 || [self.store.categories count] > 0 || [self.store.constants count] > 0) {
 		NSDictionary *vars = [self.variablesProvider variablesForHierarchyWithStore:self.store];
 		NSString *output = [self.htmlHierarchyTemplate renderObject:vars];
 		NSString *cleaned = [self stringByCleaningHtml:output];
 		NSString *path = [[self htmlOutputPathForHierarchy] stringByStandardizingPath];
 		if (![self writeString:cleaned toFile:[path stringByStandardizingPath] error:error]) {
-			GBLogWarn(@"Failed writting HTML hierarchy to '%@'!", path);
+			GBLogWarn(@"Failed writing HTML hierarchy to '%@'!", path);
 			return NO;
 		}
 	}

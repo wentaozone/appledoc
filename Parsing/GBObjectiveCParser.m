@@ -57,6 +57,7 @@
 - (BOOL)matchNextObject;
 - (BOOL)matchObjectDefinition;
 - (BOOL)matchObjectDeclaration;
+- (BOOL)matchTypedefEnumDefinition;
 - (BOOL)matchMethodDataForProvider:(GBMethodsProvider *)provider from:(NSString *)start to:(NSString *)end required:(BOOL)required;
 - (void)registerComment:(GBComment *)comment toObject:(GBModelBase *)object;
 - (void)registerLastCommentToObject:(GBModelBase *)object;
@@ -161,7 +162,11 @@
 	[self matchSuperclassForClass:class];
 	[self matchAdoptedProtocolForProvider:class.adoptedProtocols];
 	[self matchIvarsForProvider:class.ivars];
-	[self matchMethodDefinitionsForProvider:class.methods defaultsRequired:NO];
+
+    GBMethodsProvider *methodsProvider = class.methods;
+    methodsProvider.useAlphabeticalOrder = !self.settings.useCodeOrder;
+
+	[self matchMethodDefinitionsForProvider:methodsProvider defaultsRequired:NO];
 	[self.store registerClass:class];
 }
 
@@ -176,7 +181,11 @@
 	[self registerLastCommentToObject:category];
 	[self.tokenizer consume:5];
 	[self matchAdoptedProtocolForProvider:category.adoptedProtocols];
-	[self matchMethodDefinitionsForProvider:category.methods defaultsRequired:NO];
+
+    GBMethodsProvider *methodsProvider = category.methods;
+    methodsProvider.useAlphabeticalOrder = !self.settings.useCodeOrder;
+
+	[self matchMethodDefinitionsForProvider:methodsProvider defaultsRequired:NO];
 	[self.store registerCategory:category];
 }
 
@@ -190,7 +199,11 @@
 	[self registerLastCommentToObject:extension];
 	[self.tokenizer consume:4];
 	[self matchAdoptedProtocolForProvider:extension.adoptedProtocols];
-	[self matchMethodDefinitionsForProvider:extension.methods defaultsRequired:NO];
+
+    GBMethodsProvider *methodsProvider = extension.methods;
+    methodsProvider.useAlphabeticalOrder = !self.settings.useCodeOrder;
+
+	[self matchMethodDefinitionsForProvider:methodsProvider defaultsRequired:NO];
 	[self.store registerCategory:extension];
 }
 
@@ -204,7 +217,11 @@
 	[self registerLastCommentToObject:protocol];
 	[self.tokenizer consume:2];
 	[self matchAdoptedProtocolForProvider:protocol.adoptedProtocols];
-	[self matchMethodDefinitionsForProvider:protocol.methods defaultsRequired:YES];
+
+    GBMethodsProvider *methodsProvider = protocol.methods;
+    methodsProvider.useAlphabeticalOrder = !self.settings.useCodeOrder;
+
+	[self matchMethodDefinitionsForProvider:methodsProvider defaultsRequired:YES];
 	[self.store registerProtocol:protocol];
 }
 
@@ -324,6 +341,10 @@
 	GBLogVerbose(@"Matched %@ class declaration at line %lu.", className, class.prefferedSourceInfo.lineNumber);
 	[self registerLastCommentToObject:class];
 	[self.tokenizer consume:2];
+
+    GBMethodsProvider *methodsProvider = class.methods;
+    methodsProvider.useAlphabeticalOrder = !self.settings.useCodeOrder;
+
 	[self matchMethodDeclarationsForProvider:class.methods defaultsRequired:NO];
 	[self.store registerClass:class];
 }
@@ -338,7 +359,11 @@
 	GBLogVerbose(@"Matched %@(%@) category declaration at line %lu.", className, categoryName, category.prefferedSourceInfo.lineNumber);
 	[self registerLastCommentToObject:category];
 	[self.tokenizer consume:5];
-	[self matchMethodDeclarationsForProvider:category.methods defaultsRequired:NO];
+
+    GBMethodsProvider *methodsProvider = category.methods;
+    methodsProvider.useAlphabeticalOrder = !self.settings.useCodeOrder;
+
+    [self matchMethodDeclarationsForProvider:methodsProvider defaultsRequired:NO];
 	[self.store registerCategory:category];
 }
 
@@ -390,7 +415,145 @@
 - (BOOL)matchNextObject {
 	if ([self matchObjectDefinition]) return YES;
 	if ([self matchObjectDeclaration]) return YES;
+    if ([self matchTypedefEnumDefinition]) return YES;
 	return NO;
+}
+
+- (BOOL)matchTypedefEnumDefinition {
+    BOOL isTypeDef = [[self.tokenizer currentToken] matches:@"typedef"];
+    BOOL isTypeDefEnum = [[self.tokenizer lookahead:1] matches:@"NS_ENUM"];
+    BOOL isTypeDefOptions = [[self.tokenizer lookahead:1] matches:@"NS_OPTIONS"];
+    BOOL hasOpenBracket = [[self.tokenizer lookahead:2] matches:@"("];
+    
+    //ONLY SUPPORTED ARE typedef enum { } name; because that is the only way to bind the name to the enum values.
+    if(!isTypeDef)
+    {
+        return NO;
+    }
+    
+    if((isTypeDefEnum || isTypeDefOptions) && hasOpenBracket)
+    {
+        [self.tokenizer consume:3];  //consume 'typedef' 'NS_ENUM' and '('
+        
+        //get the enum type
+        NSString *typedefType = [[self.tokenizer currentToken] stringValue];
+        [self.tokenizer consume:1];
+        
+        //consume ','
+        [self.tokenizer consume:1];
+        
+        //get the typename
+        NSString *typedefName = [[self.tokenizer currentToken] stringValue];
+        [self.tokenizer consume:1];
+        
+        //consume ')'
+        [self.tokenizer consume:1];
+        
+        GBSourceInfo *startInfo = [tokenizer sourceInfoForCurrentToken];
+        GBComment *lastComment = [tokenizer lastComment];
+        GBLogVerbose(@"Matched %@ typedef enum definition at line %lu.", typedefName, startInfo.lineNumber);
+        
+        GBTypedefEnumData *newEnum = [GBTypedefEnumData typedefEnumWithName:typedefName];
+        newEnum.includeInOutput = self.includeInOutput;
+        newEnum.enumPrimitive = typedefType;
+        newEnum.isOptions = isTypeDefOptions;
+        
+        [newEnum registerSourceInfo:startInfo];
+        [self registerComment:lastComment toObject:newEnum];
+        [self.tokenizer resetComments];
+        
+        
+        //[self.tokenizer consume:1];
+        [self.tokenizer consumeFrom:@"{" to:@"}" usingBlock:^(PKToken *token, BOOL *consume, BOOL *stop)
+         {
+             /* ALWAYS start with the name of the Constant */
+              
+             GBEnumConstantData *newConstant = [GBEnumConstantData constantWithName:[token stringValue]];
+             GBSourceInfo *filedata = [tokenizer sourceInfoForToken:token];
+             [newConstant registerSourceInfo:filedata];
+             [newConstant setParentObject:newEnum];
+             [self registerLastCommentToObject:newConstant];
+             [self.tokenizer consume:1];
+             [self.tokenizer resetComments];
+             
+             [self consumeMacro];
+             
+             if([[self.tokenizer currentToken] matches:@"="])
+             {
+                 [self.tokenizer consume:1];
+                 
+                 //collect the stringvalues until a ',' is detected.
+                 NSMutableArray *values = [NSMutableArray array];
+                 
+                 while(![[tokenizer currentToken] matches:@","] && ![[tokenizer currentToken] matches:@"}"])
+                 {
+                     if(![self consumeMacro])
+                     {
+                         [values addObject:[[tokenizer currentToken] stringValue]];
+                         [tokenizer consume:1];
+                     }
+                 }
+                 
+                 NSString *value = [values componentsJoinedByString:@" "];
+                 [newConstant setAssignedValue:value];
+             }
+             
+             if([[self.tokenizer currentToken] matches:@","])
+             {
+                 [tokenizer consume:1];
+             }
+             
+             *consume = NO;
+             
+             [newEnum.constants registerConstant:newConstant];
+         }];
+        
+        //if there is a macro, consume it.
+        [self consumeMacro];
+        
+        //consume ;
+        [self.tokenizer consume:1];
+        [self.store registerTypedefEnum:newEnum];
+        return YES;
+    }
+    else
+    {
+        BOOL isRegularEnum = [[self.tokenizer lookahead:1] matches:@"enum"];
+        BOOL isCurlyBrace = [[self.tokenizer lookahead:2] matches:@"{"];
+        
+        if(isRegularEnum && isCurlyBrace)
+        {
+            GBSourceInfo *startInfo = [tokenizer sourceInfoForCurrentToken];
+            GBLogXWarn(startInfo, @"unsupported typedef enum at %@!", startInfo);
+        }
+    }
+    return NO;
+}
+
+-(bool)isTokenUppercaseOnly:(NSString *)token
+{
+    return [token isEqualToString:[token uppercaseString]];
+}
+
+-(bool)consumeMacro
+{
+    //Eat away and MACRO
+    if( ![[self.tokenizer currentToken] matches:@"="]
+          && ![[self.tokenizer currentToken] matches:@"}"]
+          && ![[self.tokenizer currentToken] matches:@","]
+          && [[self.tokenizer currentToken] isWord]
+          && [self isTokenUppercaseOnly:[[self.tokenizer currentToken] stringValue]])
+    {
+        [self.tokenizer consume:1];
+        
+        //now a macro may come with bracketed arguments.
+        if([[self.tokenizer currentToken] matches:@"("])
+        {
+            [self.tokenizer consumeTo:@")" usingBlock:nil];
+        }
+        return YES;
+    }
+    return NO;
 }
 
 - (BOOL)matchObjectDefinition {
@@ -459,13 +622,14 @@
 	__block BOOL assertMethod = YES;
 	__block BOOL result = NO;
 	__block GBSourceInfo *filedata = nil;
-	GBMethodType methodType = [start isEqualToString:@"-"] ? GBMethodTypeInstance : GBMethodTypeClass;
+	__block GBMethodType methodType = [start isEqualToString:@"-"] ? GBMethodTypeInstance : GBMethodTypeClass;
 	[self updateLastComment:&comment sectionComment:&sectionComment sectionName:&sectionName];
 	[self.tokenizer consumeFrom:start to:end usingBlock:^(PKToken *token, BOOL *consume, BOOL *stop) {
 		// In order to provide at least some assurance the minus or plus actually starts the method, we validate next token is opening parenthesis. Very simple so might need some refinement... Note that we skip subsequent - or + tokens so that we can handle stuff like '#pragma mark -' gracefully (note that we also do it for + although that shouldn't be necessary, but feels safer).
 		if (assertMethod) {
 			if ([token matches:@"-"] || [token matches:@"+"]) {
 				[self updateLastComment:&comment sectionComment:&sectionComment sectionName:&sectionName];
+				methodType = [token matches:@"-"] ? GBMethodTypeInstance : GBMethodTypeClass;
 				return;
 			}
 			if (![token matches:@"("]) {

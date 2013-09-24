@@ -10,6 +10,8 @@
 #import "GBMethodArgument.h"
 #import "GBMethodSectionData.h"
 #import "GBMethodData.h"
+#import "GBClassData.h"
+#import "GBCategoryData.h"
 #import "RegexKitLite.h"
 
 @interface GBMethodData ()
@@ -116,6 +118,7 @@
 		_methodPrefix = [[self prefixFromAssignedData] retain];
 		_methodSelectorDelimiter = [[self selectorDelimiterFromAssignedData] retain];
 		_methodSelector = [[self selectorFromAssignedData] retain];
+        _methodReturnType = (NSString *)self.methodResultTypes.firstObject;
 		_prefixedMethodSelector = [[self prefixedSelectorFromAssignedData] retain];
 	}
 	return self;
@@ -133,18 +136,28 @@
 		// Add the list of attributes.
 		if ([self.methodAttributes count] > 0) {
 			__block BOOL isSetterOrGetter = NO;
+            __block BOOL hasSetter = NO;
 			[result addObject:[self formattedComponentWithValue:@"("]];
 			[self.methodAttributes enumerateObjectsUsingBlock:^(NSString *attribute, NSUInteger idx, BOOL *stop) {
-				[result addObject:[self formattedComponentWithValue:attribute]];
+				if(hasSetter && [attribute isEqualToString:@":"]) //remove previously added "," and " " to keep clean setter=xxx:
+                {
+                    [result removeLastObject];
+                    [result removeLastObject];
+                    hasSetter = NO;
+                }
+                [result addObject:[self formattedComponentWithValue:attribute]];
 				if ([attribute isEqualToString:@"setter"] || [attribute isEqualToString:@"getter"]) {
 					isSetterOrGetter = YES;
+                    if ([attribute isEqualToString:@"setter"]) {
+                        hasSetter = YES;
+                    }
 					return;
 				}
 				if (isSetterOrGetter) {
 					if ([attribute isEqualToString:@"="]) return;
 					isSetterOrGetter = NO;
 				}
-				if (idx < [self.methodAttributes count]-1) {
+				if (idx < [self.methodAttributes count]-1 ) {
 					[result addObject:[self formattedComponentWithValue:@","]];
 					[result addObject:[self formattedComponentWithValue:@" "]];
 				}
@@ -201,7 +214,7 @@
 		if (isLast || isPointer) appendSpace = NO;
 		
 		// We should not add space between components of a protocol (i.e. id<ProtocolName> should be written without any space). Because we've alreay
-		if (!isLast && [[types objectAtIndex:idx+1] isEqualToString:@"<"])
+		if (!isLast && idx+1 < [types count] && [[types objectAtIndex:idx+1] isEqualToString:@"<"])
 			insideProtocol = YES;
 		else if ([type isEqualToString:@">"])
 			insideProtocol = NO;
@@ -223,7 +236,7 @@
 	[result setObject:value forKey:@"value"];
 	if (style > 0) {
 		[result setObject:[NSNumber numberWithUnsignedInt:style] forKey:@"style"];
-		[result setObject:[GRYes yes] forKey:@"emphasized"];
+		[result setObject:[NSNumber numberWithBool:YES] forKey:@"emphasized"];
 	}
 	if (href) [result setObject:href forKey:@"href"];
 	return result;
@@ -279,6 +292,13 @@
 	return result;
 }
 
+- (NSString *)propertyType {
+    if (self.methodType != GBMethodTypeProperty) return nil;
+    NSString *result = (NSString *)self.methodResultTypes.firstObject;
+    if (!result) result = self.methodReturnType;
+    return result;
+}
+
 - (NSString *)attributeValueForKey:(NSString *)key {
 	// Returns the value after equal sign for the given key (i.e. for attributes "getter", "=", "value", this would return "value"). Returns nil if either key isn't found or isn't followed by equal sign and/or a value.
 	__block NSString *result = nil;
@@ -317,10 +337,11 @@
 			[NSException raise:@"Failed merging %@ to %@; method type doesn't match!", source, self];
 		}
 		
-		// We should allow if the getter or setter matches.
+		// We should allow if the getter or setter matches and if the getter name is shared to an instance method.
 		if ([propertyData.propertyGetterSelector isEqualToString:manualData.methodSelector]) return YES;
 		if ([propertyData.propertySetterSelector isEqualToString:manualData.methodSelector]) return YES;
-		[NSException raise:@"Failed merging %@ to %@; getter or setter doesn't match", source, self];
+		if (![propertyData.propertyType isEqualToString:manualData.methodReturnType]) return YES;
+        [NSException raise:@"Failed merging %@ to %@; getter or setter doesn't match", source, self];
 	} else {
 		// If assertion from code below is present, it breaks cases where category declares a property which is also getter for a property from class declaration. See #184 https://github.com/tomaz/appledoc/issues/184 for details. I'm leaving the code commented for the moment to see if it also affects some other user (don't think so, but just in case).
 		//NSParameterAssert([source.methodSelector isEqualToString:self.methodSelector]);
@@ -365,6 +386,21 @@
 
 #pragma mark Properties
 
+- (NSString *)methodTypeString {
+    BOOL isInterfaceParent = (![self.parentObject isKindOfClass:[GBClassData class]] &&
+                              ![self.parentObject isKindOfClass:[GBCategoryData class]]);
+    switch (self.methodType)
+    {
+        case GBMethodTypeClass:
+            return isInterfaceParent ? @"intfcm" : @"clm";
+        case GBMethodTypeInstance:
+            return isInterfaceParent ? @"intfm" : @"instm";
+        case GBMethodTypeProperty:
+            return isInterfaceParent ? @"intfp" : @"instp";
+    }
+    return @"";
+}
+
 - (BOOL)isInstanceMethod {
 	return (self.methodType == GBMethodTypeInstance);
 }
@@ -386,6 +422,7 @@
 @synthesize methodResultTypes = _methodResultTypes;
 @synthesize methodArguments = _methodArguments;
 @synthesize methodSelector = _methodSelector;
+@synthesize methodReturnType = _methodReturnType;
 @synthesize methodSelectorDelimiter = _methodSelectorDelimiter;
 @synthesize methodPrefix = _methodPrefix;
 @synthesize prefixedMethodSelector = _prefixedMethodSelector;

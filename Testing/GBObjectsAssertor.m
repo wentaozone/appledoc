@@ -107,7 +107,7 @@
 		[data setObject:value forKey:@"value"];
 		[data setObject:style forKey:@"style"];
 		[data setObject:href forKey:@"href"];
-		if ([style unsignedIntValue] == 1) [data setObject:[GRYes yes] forKey:@"emphasized"];
+		if ([style unsignedIntValue] == 1) [data setObject:[NSNumber numberWithBool:YES] forKey:@"emphasized"];
 		[arguments addObject:data];
 		
 		value = va_arg(args, NSString *);
@@ -209,10 +209,13 @@
 			[expectedComps removeObjectAtIndex:0];
 			char *argList = NULL;
 			if ([expectedComps count] > 0) {
-				argList = (char *)malloc(sizeof(NSString *) * [expectedComps count]);
+				argList = (char *)malloc(sizeof(char) * [expectedComps count]);
 				[expectedComps getObjects:(id *)argList];				
 			}
-			[self assertCommentComponents:argument.argumentDescription matchesValues:firstExpectedComp values:(__va_list_tag *)argList];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wincompatible-pointer-types"
+			[self assertCommentComponents:argument.argumentDescription matchesValues:firstExpectedComp values:argList];
+#pragma clang diagnostic pop
 		}
 	}
 }

@@ -15,12 +15,15 @@
 #import "GBGenerator.h"
 #import "GBApplicationSettingsProvider.h"
 #import "GBAppledocApplication.h"
+#import "DDXcodeProjectFile.h"
+#import "DDEmbeddedDataReader.h"
+#import "DDZipReader.h"
 
 static NSString *kGBArgInputPath = @"input";
 static NSString *kGBArgOutputPath = @"output";
 static NSString *kGBArgTemplatesPath = @"templates";
 static NSString *kGBArgDocSetInstallPath = @"docset-install-path";
-static NSString *kGBArgDocSetUtilPath = @"docsetutil-path";
+static NSString *kGBArgXcrunPath = @"xcrun-path";
 static NSString *kGBArgIndexDescPath = @"index-desc";
 static NSString *kGBArgIncludePath = @"include";
 static NSString *kGBArgIgnorePath = @"ignore";
@@ -36,6 +39,7 @@ static NSString *kGBArgCreateHTML = @"create-html";
 static NSString *kGBArgCreateDocSet = @"create-docset";
 static NSString *kGBArgInstallDocSet = @"install-docset";
 static NSString *kGBArgPublishDocSet = @"publish-docset";
+static NSString *kGBArgHTMLAnchorFormat = @"html-anchors";
 static NSString *kGBArgKeepIntermediateFiles = @"keep-intermediate-files";
 static NSString *kGBArgExitCodeThreshold = @"exit-threshold";
 
@@ -50,6 +54,7 @@ static NSString *kGBArgMergeCategoriesToClasses = @"merge-categories";
 static NSString *kGBArgMergeCategoryComment = @"merge-category-comment";
 static NSString *kGBArgKeepMergedCategoriesSections = @"keep-merged-sections";
 static NSString *kGBArgPrefixMergedCategoriesSectionsWithCategoryName = @"prefix-merged-sections";
+static NSString *kGBArgUseCodeOrder = @"use-code-order";
 
 static NSString *kGBArgExplicitCrossRef = @"explicit-crossref";
 static NSString *kGBArgCrossRefFormat = @"crossref-format";
@@ -69,6 +74,7 @@ static NSString *kGBArgDocSetDescription = @"docset-desc";
 static NSString *kGBArgDocSetCopyrightMessage = @"docset-copyright";
 static NSString *kGBArgDocSetFeedName = @"docset-feed-name";
 static NSString *kGBArgDocSetFeedURL = @"docset-feed-url";
+static NSString *kGBArgDocSetFeedFormats = @"docset-feed-formats";
 static NSString *kGBArgDocSetPackageURL = @"docset-package-url";
 static NSString *kGBArgDocSetFallbackURL = @"docset-fallback-url";
 static NSString *kGBArgDocSetPublisherIdentifier = @"docset-publisher-id";
@@ -81,6 +87,7 @@ static NSString *kGBArgDocSetCertificateSigner = @"docset-cert-signer";
 
 static NSString *kGBArgDocSetBundleFilename = @"docset-bundle-filename";
 static NSString *kGBArgDocSetAtomFilename = @"docset-atom-filename";
+static NSString *kGBArgDocSetXMLFilename = @"docset-xml-filename";
 static NSString *kGBArgDocSetPackageFilename = @"docset-package-filename";
 
 static NSString *kGBArgLogFormat = @"logformat";
@@ -101,6 +108,7 @@ static NSString *kGBArgHelp = @"help";
 - (NSString *)standardizeCurrentDirectoryForPath:(NSString *)path;
 - (NSString *)combineBasePath:(NSString *)base withRelativePath:(NSString *)path;
 
+- (void)injectXcodeSettingsFromArguments:(NSArray *)arguments;
 - (void)injectGlobalSettingsFromArguments:(NSArray *)arguments;
 - (void)injectProjectSettingsFromArguments:(NSArray *)arguments;
 - (void)overrideSettingsWithGlobalSettingsFromPath:(NSString *)path;
@@ -217,7 +225,7 @@ static NSString *kGBArgHelp = @"help";
 	}
 	
 	int result = (kGBLogBasedResult >= self.settings.exitCodeThreshold) ? kGBLogBasedResult : 0;
-	GBLogDebug(@"Exiting with result %ld (reported result was %ld)...", result, kGBLogBasedResult);
+	GBLogDebug(@"Exiting with result %d (reported result was %ld)...", result, kGBLogBasedResult);
 	return result;
 }
 
@@ -230,7 +238,7 @@ static NSString *kGBArgHelp = @"help";
 		{ kGBArgIncludePath,												's',	DDGetoptRequiredArgument },
 		{ kGBArgIndexDescPath,												0,		DDGetoptRequiredArgument },
 		{ kGBArgDocSetInstallPath,											0,		DDGetoptRequiredArgument },
-		{ kGBArgDocSetUtilPath,												0,		DDGetoptRequiredArgument },
+		{ kGBArgXcrunPath,                                                  0,		DDGetoptRequiredArgument },
 		
 		{ kGBArgProjectName,												'p',	DDGetoptRequiredArgument },
 		{ kGBArgProjectVersion,												'v',	DDGetoptRequiredArgument },
@@ -245,6 +253,7 @@ static NSString *kGBArgHelp = @"help";
 		{ kGBArgDocSetFallbackURL,											0,		DDGetoptRequiredArgument },
 		{ kGBArgDocSetFeedName,												0,		DDGetoptRequiredArgument },
 		{ kGBArgDocSetFeedURL,												0,		DDGetoptRequiredArgument },
+        { kGBArgDocSetFeedFormats,                                          0,      DDGetoptRequiredArgument },
 		{ kGBArgDocSetPackageURL,											0,		DDGetoptRequiredArgument },
 		{ kGBArgDocSetMinimumXcodeVersion,									0,		DDGetoptRequiredArgument },
 		{ kGBArgDocSetPlatformFamily,										0,		DDGetoptRequiredArgument },
@@ -255,6 +264,7 @@ static NSString *kGBArgHelp = @"help";
 		
 		{ kGBArgDocSetBundleFilename,										0,		DDGetoptRequiredArgument },
 		{ kGBArgDocSetAtomFilename,											0,		DDGetoptRequiredArgument },
+        { kGBArgDocSetXMLFilename,                                          0,      DDGetoptRequiredArgument },
 		{ kGBArgDocSetPackageFilename,										0,		DDGetoptRequiredArgument },
 		
 		{ kGBArgCleanOutput,												0,		DDGetoptNoArgument },
@@ -262,6 +272,7 @@ static NSString *kGBArgHelp = @"help";
 		{ kGBArgCreateDocSet,												'd',	DDGetoptNoArgument },
 		{ kGBArgInstallDocSet,												'n',	DDGetoptNoArgument },
 		{ kGBArgPublishDocSet,												'u',	DDGetoptNoArgument },
+        { kGBArgHTMLAnchorFormat,                                           0,      DDGetoptRequiredArgument },
 		{ GBNoArg(kGBArgCreateHTML),										0,		DDGetoptNoArgument },
 		{ GBNoArg(kGBArgCreateDocSet),										0,		DDGetoptNoArgument },
 		{ GBNoArg(kGBArgInstallDocSet),										0,		DDGetoptNoArgument },
@@ -283,6 +294,7 @@ static NSString *kGBArgHelp = @"help";
 		{ kGBArgMergeCategoriesToClasses,									0,		DDGetoptNoArgument },
 		{ kGBArgKeepMergedCategoriesSections,								0,		DDGetoptNoArgument },
 		{ kGBArgPrefixMergedCategoriesSectionsWithCategoryName,				0,		DDGetoptNoArgument },
+        { kGBArgUseCodeOrder,                                               0,		DDGetoptNoArgument },
 		{ kGBArgExitCodeThreshold,											0,		DDGetoptRequiredArgument },
 		{ GBNoArg(kGBArgKeepIntermediateFiles),								0,		DDGetoptNoArgument },
 		{ GBNoArg(kGBArgKeepUndocumentedObjects),							0,		DDGetoptNoArgument },
@@ -292,6 +304,7 @@ static NSString *kGBArgHelp = @"help";
 		{ GBNoArg(kGBArgMergeCategoriesToClasses),							0,		DDGetoptNoArgument },
 		{ GBNoArg(kGBArgKeepMergedCategoriesSections),						0,		DDGetoptNoArgument },
 		{ GBNoArg(kGBArgPrefixMergedCategoriesSectionsWithCategoryName),	0,		DDGetoptNoArgument },
+        { GBNoArg(kGBArgUseCodeOrder),	                                    0,		DDGetoptNoArgument },
 		
 		{ kGBArgWarnOnMissingOutputPath,									0,		DDGetoptNoArgument },
 		{ kGBArgWarnOnMissingCompanyIdentifier,								0,		DDGetoptNoArgument },
@@ -318,6 +331,7 @@ static NSString *kGBArgHelp = @"help";
 		{ nil,																0,		0 },
 	};
 	NSArray *arguments = [[NSProcessInfo processInfo] arguments];
+    [self injectXcodeSettingsFromArguments:arguments];
 	[self injectGlobalSettingsFromArguments:arguments];
 	[self injectProjectSettingsFromArguments:arguments];
 	[optionParser addOptionsFromTable:options];
@@ -362,6 +376,11 @@ static NSString *kGBArgHelp = @"help";
 	if (!self.templatesFound) {
 		[NSException raise:@"No predefined templates path exists and no template path specified from command line!"];
 	}
+    
+    if ([[NSScanner scannerWithString:self.verbose] scanInt:NULL] == false)
+    {
+        [NSException raise:@"--%@ argument or global setting must be numeric!", kGBArgVerbose];
+    }
 	
 	// Validate we have at least one argument specifying the path to the files to handle. Also validate all given paths are valid.
 	if ([arguments count] == 0) [NSException raise:@"At least one directory or file name path is required, use 'appledoc --help'"];
@@ -419,6 +438,52 @@ static NSString *kGBArgHelp = @"help";
 	}
 }
 
+- (BOOL)extractShippedTemplatesToPath:(NSString *)path {
+    path = [path stringByExpandingTildeInPath];
+    
+    //read embedded data
+    NSData *data = [DDEmbeddedDataReader embeddedDataFromSegment:@"__ZIP" inSection:@"__templates" error:nil];
+    if(!data) {
+        NSLog( @"Error: extractShippedTemplatesToPath called, but no data embeded" );
+        return NO;
+    }
+
+    //get a path
+    NSString *p = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSProcessInfo processInfo] globallyUniqueString]];
+    
+    //write the data
+    BOOL br = [data writeToFile:p atomically:NO];
+    if(!br) {
+        NSLog( @"Error: extractShippedTemplatesToPath failed write data to tmp path %@", p );
+        return NO;
+    }
+    
+    //open the zip
+    DDZipReader *reader = [[DDZipReader alloc] init];
+    br = [reader openZipFile:p];
+    if(!br) {
+        NSLog( @"Error: extractShippedTemplatesToPath failed to open the zip at %@", p );
+        return NO;
+    }
+    
+    //extract
+    br = [reader unzipFileTo:path flattenStructure:NO];
+    if(!br) {
+        NSLog( @"Error: extractShippedTemplatesToPath failed to unzip the zip from %@ TO %@", p, path );
+        return NO;
+    }
+    
+    //close and remove the temp
+    [reader closeZipFile];
+    br = [[NSFileManager defaultManager] removeItemAtPath:p error:nil];
+    if(!br) {
+        NSLog( @"Error: extractShippedTemplatesToPath failed to rm %@", p );
+        return NO;
+    }
+
+    return YES;
+}
+
 - (BOOL)validateTemplatesPath:(NSString *)path error:(NSError **)error {
 	// Validates the given templates path contains all required template files. If not, it returns the reason through the error argument and returns NO. Note that we only do simple "path exist and is directory" tests here, each object that requires templates at the given path will do it's own validation later on and will report errors if it finds something missing.
 	BOOL isDirectory = NO;
@@ -455,7 +520,38 @@ static NSString *kGBArgHelp = @"help";
 	return [base stringByAppendingPathComponent:path];
 }
 
-#pragma mark Global and project settings handling
+#pragma mark Xcode, Global and project settings handling
+
+- (void)injectXcodeSettingsFromArguments:(NSArray *)arguments {
+    //check if even deal with a project
+    if([arguments count] < 2)
+        return;
+    NSString *path = [arguments objectAtIndex:1];
+    if(![path.pathExtension isEqualToString:@"xcodeproj"])
+        return;
+
+    //parse the file and get a representation of it
+    NSError *error = nil;
+    DDXcodeProjectFile *file = [DDXcodeProjectFile xcodeProjectFileWithPath:path error:&error];
+    if(!file) {
+        NSLog(@"Failed to parse pbx at %@: %@", path, error);
+        return;
+    }
+    
+    //set basic vars
+    [self setProjectName:file.name];
+    [self setProjectCompany:file.company];
+
+    //prepare docset
+    [self setCreateDocset:YES];
+    [self setInstallDocset:YES];
+    [self setDocsetBundleName:file.name];
+    [self setCompanyId:[file.company stringByAppendingFormat:@".%@", file.name].lowercaseString];
+
+    //set output path to be next to project
+    [self.additionalInputPaths addObject:file.projectRoot];
+    [self setOutput:file.projectRoot];
+}
 
 - (void)injectGlobalSettingsFromArguments:(NSArray *)arguments {
 	// This is where we override factory defaults (factory defaults with global templates). This needs to be sent before giving DDCli a chance to go through parameters! DDCli will "take care" (or more correct: it's KVC messages will) of overriding with command line arguments. Note that we scan the arguments backwards to get the latest template value - this is what we'll get with DDCli later on anyway. If no template path is given, check predefined paths.
@@ -496,7 +592,7 @@ static NSString *kGBArgHelp = @"help";
 			self.templatesFound = YES;
 			return;
 		}
-
+        
         #ifdef COMPILE_TIME_DEFAULT_TEMPLATE_PATH
 		path = COMPILE_TIME_DEFAULT_TEMPLATE_PATH;
 		if ([self validateTemplatesPath:path error:nil]) {
@@ -506,6 +602,18 @@ static NSString *kGBArgHelp = @"help";
 			return;
 		}
         #endif
+        
+        //if we got here, there is NO templates installed which we can find.
+        //IF we have embedded data though, we can get THAT and install it
+		path = @"~/.appledoc";
+        [self extractShippedTemplatesToPath:path];
+		if ([self validateTemplatesPath:path error:nil]) {
+			[self overrideSettingsWithGlobalSettingsFromPath:path];
+			self.settings.templatesPath = path;
+			self.templatesFound = YES;
+			return;
+		}
+                
 	}
 }
 
@@ -589,7 +697,7 @@ static NSString *kGBArgHelp = @"help";
 	NSData* data = [NSData dataWithContentsOfFile:path options:0 error:&error];
 	if (!data) [NSException raise:@"Failed reading settings from '%@'!", path];	
 	NSDictionary *theSettings = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:NULL error:&error];
-	if (!theSettings) [NSException raiseWithError:error format:@"Failed reaing settings plist from '%@'!", path];
+	if (!theSettings) [NSException raiseWithError:error format:@"Failed reading settings plist from '%@'!", path];
 	
 	// We first pass each option and it's value to the block. The block can return YES to allow handling it, NO otherwise. It can also pass back a different value (we're passing a pointer to the value!).
 	[theSettings enumerateKeysAndObjectsUsingBlock:^(NSString *option, id value, BOOL *stop) {
@@ -620,7 +728,7 @@ static NSString *kGBArgHelp = @"help";
 
 - (void)setOutput:(NSString *)path { self.settings.outputPath = [self standardizeCurrentDirectoryForPath:path]; }
 - (void)setDocsetInstallPath:(NSString *)path { self.settings.docsetInstallPath = [self standardizeCurrentDirectoryForPath:path]; }
-- (void)setDocsetutilPath:(NSString *)path { self.settings.docsetUtilPath = [self standardizeCurrentDirectoryForPath:path]; }
+- (void)setXCRunPath:(NSString *)path { self.settings.xcrunPath = [self standardizeCurrentDirectoryForPath:path]; }
 - (void)setInclude:(NSString *)path { [self.settings.includePaths addObject:[self standardizeCurrentDirectoryForPath:path]]; }
 - (void)setIndexDesc:(NSString *)path { self.settings.indexDescriptionPath = [self standardizeCurrentDirectoryForPath:path]; }
 - (void)setTemplates:(NSString *)path { self.settings.templatesPath = [self standardizeCurrentDirectoryForPath:path]; }
@@ -673,6 +781,9 @@ static NSString *kGBArgHelp = @"help";
 	//	self.settings.installDocSet = YES;
 	}
 }
+- (void)setHtmlAnchors:(NSString *)value {
+    self.settings.htmlAnchorFormat = GBHTMLAnchorFormatFromNSString(value);
+}
 - (void)setNoCleanOutput:(BOOL)value { self.settings.cleanupOutputPathBeforeRunning = !value; }
 - (void)setNoCreateHtml:(BOOL)value { [self setCreateHtml:!value]; }
 - (void)setNoCreateDocset:(BOOL)value { [self setCreateDocset:!value]; }
@@ -708,6 +819,8 @@ static NSString *kGBArgHelp = @"help";
 - (void)setNoMergeCategoryComment:(BOOL)value { self.settings.mergeCategoryCommentToClass = !value; }
 - (void)setNoKeepMergedSections:(BOOL)value { self.settings.keepMergedCategoriesSections = !value; }
 - (void)setNoPrefixMergedSections:(BOOL)value { self.settings.prefixMergedCategoriesSectionsWithCategoryName = !value; }
+- (void)setUseCodeOrder:(BOOL)value { self.settings.useCodeOrder = value; }
+- (void)setNoUseCodeOrder:(BOOL)value { self.settings.useCodeOrder = !value; }
 
 - (void)setWarnMissingOutputPath:(BOOL)value { self.settings.warnOnMissingOutputPathArgument = value; }
 - (void)setWarnMissingCompanyId:(BOOL)value { self.settings.warnOnMissingCompanyIdentifier = value; }
@@ -732,6 +845,9 @@ static NSString *kGBArgHelp = @"help";
 - (void)setDocsetCopyright:(NSString *)value { self.settings.docsetCopyrightMessage = value; }
 - (void)setDocsetFeedName:(NSString *)value { self.settings.docsetFeedName = value; }
 - (void)setDocsetFeedUrl:(NSString *)value { self.settings.docsetFeedURL = value; }
+- (void)setDocsetFeedFormats:(NSString *)value {
+    self.settings.docsetFeedFormats = GBPublishedFeedFormatsFromNSString(value);
+}
 - (void)setDocsetPackageUrl:(NSString *)value { self.settings.docsetPackageURL = value; }
 - (void)setDocsetFallbackUrl:(NSString *)value { self.settings.docsetFallbackURL = value; }
 - (void)setDocsetPublisherId:(NSString *)value { self.settings.docsetPublisherIdentifier = value; }
@@ -744,6 +860,7 @@ static NSString *kGBArgHelp = @"help";
 
 - (void)setDocsetBundleFilename:(NSString *)value { self.settings.docsetBundleFilename = value; }
 - (void)setDocsetAtomFilename:(NSString *)value { self.settings.docsetAtomFilename = value; }
+- (void)setDocsetXMLFilename:(NSString *)value { self.settings.docsetXMLFilename = value; }
 - (void)setDocsetPackageFilename:(NSString *)value { self.settings.docsetPackageFilename = value; }
 
 @synthesize additionalInputPaths;
@@ -786,7 +903,7 @@ static NSString *kGBArgHelp = @"help";
 	for (NSString *path in self.settings.ignoredPaths) ddprintf(@"--%@ = %@\n", kGBArgIgnorePath, path);
 	for (NSString *path in self.settings.excludeOutputPaths) ddprintf(@"--%@ = %@\n", kGBArgExcludeOutputPath, path);
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetInstallPath, self.settings.docsetInstallPath);
-	ddprintf(@"--%@ = %@\n", kGBArgDocSetUtilPath, self.settings.docsetUtilPath);
+	ddprintf(@"--%@ = %@\n", kGBArgXcrunPath, self.settings.xcrunPath);
 	ddprintf(@"\n");
 	
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetBundleIdentifier, self.settings.docsetBundleIdentifier);
@@ -795,6 +912,7 @@ static NSString *kGBArgHelp = @"help";
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetCopyrightMessage, self.settings.docsetCopyrightMessage);
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetFeedName, self.settings.docsetFeedName);
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetFeedURL, self.settings.docsetFeedURL);
+    ddprintf(@"--%@ = %@\n", kGBArgDocSetFeedFormats, NSStringFromGBPublishedFeedFormats(self.settings.docsetFeedFormats));
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetPackageURL, self.settings.docsetPackageURL);
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetFallbackURL, self.settings.docsetFallbackURL);
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetPublisherIdentifier, self.settings.docsetPublisherIdentifier);
@@ -805,6 +923,7 @@ static NSString *kGBArgHelp = @"help";
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetCertificateSigner, self.settings.docsetCertificateSigner);
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetBundleFilename, self.settings.docsetBundleFilename);
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetAtomFilename, self.settings.docsetAtomFilename);
+    ddprintf(@"--%@ = %@\n", kGBArgDocSetXMLFilename, self.settings.docsetXMLFilename);
 	ddprintf(@"--%@ = %@\n", kGBArgDocSetPackageFilename, self.settings.docsetPackageFilename);
 	ddprintf(@"\n");
 	
@@ -813,6 +932,7 @@ static NSString *kGBArgHelp = @"help";
 	ddprintf(@"--%@ = %@\n", kGBArgCreateDocSet, PRINT_BOOL(self.settings.createDocSet));
 	ddprintf(@"--%@ = %@\n", kGBArgInstallDocSet, PRINT_BOOL(self.settings.installDocSet));
 	ddprintf(@"--%@ = %@\n", kGBArgPublishDocSet, PRINT_BOOL(self.settings.publishDocSet));
+    ddprintf(@"--%@ = %@\n", kGBArgHTMLAnchorFormat, NSStringFromGBHTMLAnchorFormat(self.settings.htmlAnchorFormat));
 	ddprintf(@"--%@ = %@\n", kGBArgKeepIntermediateFiles, PRINT_BOOL(self.settings.keepIntermediateFiles));
 	ddprintf(@"--%@ = %@\n", kGBArgKeepUndocumentedObjects, PRINT_BOOL(self.settings.keepUndocumentedObjects));
 	ddprintf(@"--%@ = %@\n", kGBArgKeepUndocumentedMembers, PRINT_BOOL(self.settings.keepUndocumentedMembers));
@@ -826,6 +946,7 @@ static NSString *kGBArgHelp = @"help";
 	ddprintf(@"--%@ = %@\n", kGBArgKeepMergedCategoriesSections, PRINT_BOOL(self.settings.keepMergedCategoriesSections));
 	ddprintf(@"--%@ = %@\n", kGBArgPrefixMergedCategoriesSectionsWithCategoryName, PRINT_BOOL(self.settings.prefixMergedCategoriesSectionsWithCategoryName));
 	ddprintf(@"--%@ = %@\n", kGBArgCrossRefFormat, self.settings.commentComponents.crossReferenceMarkersTemplate);
+	ddprintf(@"--%@ = %@\n", kGBArgUseCodeOrder, self.settings.useCodeOrder);
 	ddprintf(@"--%@ = %ld\n", kGBArgExitCodeThreshold, self.settings.exitCodeThreshold);
 	ddprintf(@"\n");
 	
@@ -877,6 +998,7 @@ static NSString *kGBArgHelp = @"help";
 	PRINT_USAGE(@"-d,", kGBArgCreateDocSet, @"", @"[b] Create documentation set");
 	PRINT_USAGE(@"-n,", kGBArgInstallDocSet, @"", @"[b] Install documentation set to Xcode");
 	PRINT_USAGE(@"-u,", kGBArgPublishDocSet, @"", @"[b] Prepare DocSet for publishing");
+    PRINT_USAGE(@"   ", kGBArgHTMLAnchorFormat, @"<string>", @"[*] The html anchor format to use in DocSet HTML.");
 	PRINT_USAGE(@"   ", kGBArgCleanOutput, @"", @"[b] Remove contents of output path before starting !!CAUTION!!");
 	ddprintf(@"\n");
 	ddprintf(@"OPTIONS\n");
@@ -892,9 +1014,10 @@ static NSString *kGBArgHelp = @"help";
 	PRINT_USAGE(@"   ", kGBArgMergeCategoryComment, @"", @"[b] Merge category comment to class");
 	PRINT_USAGE(@"   ", kGBArgKeepMergedCategoriesSections, @"", @"[b] Keep merged categories sections");
 	PRINT_USAGE(@"   ", kGBArgPrefixMergedCategoriesSectionsWithCategoryName, @"", @"[b] Prefix merged sections with category name");
-	PRINT_USAGE(@"   ", kGBArgExplicitCrossRef, @"", @"[b] Shortcut for explicit default cross ref template");
-	PRINT_USAGE(@"   ", kGBArgCrossRefFormat, @"<string>", @"Cross reference template regex");
-	PRINT_USAGE(@"   ", kGBArgExitCodeThreshold, @"<number>", @"Exit code threshold below which 0 is returned");
+    PRINT_USAGE(@"   ", kGBArgExplicitCrossRef, @"", @"[b] Shortcut for explicit default cross ref template");
+    PRINT_USAGE(@"   ", kGBArgUseCodeOrder, @"", @"[b] Order sections by the order specified in the input files");
+    PRINT_USAGE(@"   ", kGBArgCrossRefFormat, @"<string>", @"Cross reference template regex");
+    PRINT_USAGE(@"   ", kGBArgExitCodeThreshold, @"<number>", @"Exit code threshold below which 0 is returned");
 	ddprintf(@"\n");
 	ddprintf(@"WARNINGS\n");
 	PRINT_USAGE(@"   ", kGBArgWarnOnMissingOutputPath, @"", @"[b] Warn if output path is not given");
@@ -913,6 +1036,7 @@ static NSString *kGBArgHelp = @"help";
 	PRINT_USAGE(@"   ", kGBArgDocSetCopyrightMessage, @"<string>", @"[*] DocSet copyright message");
 	PRINT_USAGE(@"   ", kGBArgDocSetFeedName, @"<string>", @"[*] DocSet feed name");
 	PRINT_USAGE(@"   ", kGBArgDocSetFeedURL, @"<string>", @"[*] DocSet feed URL");
+    PRINT_USAGE(@"   ", kGBArgDocSetFeedFormats, @"<values>", @"DocSet feed formats. Separated by a comma [atom,xml]");
 	PRINT_USAGE(@"   ", kGBArgDocSetPackageURL, @"<string>", @"[*] DocSet package (.xar) URL");
 	PRINT_USAGE(@"   ", kGBArgDocSetFallbackURL, @"<string>", @"[*] DocSet fallback URL");
 	PRINT_USAGE(@"   ", kGBArgDocSetPublisherIdentifier, @"<string>", @"[*] DocSet publisher identifier");
@@ -923,7 +1047,8 @@ static NSString *kGBArgHelp = @"help";
 	PRINT_USAGE(@"   ", kGBArgDocSetCertificateSigner, @"<string>", @"[*] DocSet certificate signer");
 	PRINT_USAGE(@"   ", kGBArgDocSetBundleFilename, @"<string>", @"[*] DocSet bundle filename");
 	PRINT_USAGE(@"   ", kGBArgDocSetAtomFilename, @"<string>", @"[*] DocSet atom feed filename");
-	PRINT_USAGE(@"   ", kGBArgDocSetPackageFilename, @"<string>", @"[*] DocSet package (.xar) filename");
+    PRINT_USAGE(@"   ", kGBArgDocSetXMLFilename, @"<string>", @"[*] DocSet xml feed filename");
+	PRINT_USAGE(@"   ", kGBArgDocSetPackageFilename, @"<string>", @"[*] DocSet package (.xar,.tgz) filename. Leave off the extension. This will be added depending on the generated package.");
 	ddprintf(@"\n");
 	ddprintf(@"MISCELLANEOUS\n");
 	PRINT_USAGE(@"   ", kGBArgLogFormat, @"<number>", @"Log format [0-3]");
