@@ -17,6 +17,7 @@
 - (void)processClasses;
 - (void)processCategories;
 - (void)processProtocols;
+- (void)processConstants;
 - (void)processDocuments;
 
 - (void)processMethodsFromProvider:(GBMethodsProvider *)provider;
@@ -76,6 +77,7 @@
 	[self processClasses];
 	[self processCategories];
 	[self processProtocols];
+    [self processConstants];
 	[self processDocuments];
 }
 
@@ -125,6 +127,21 @@
 	}
 }
 
+- (void)processConstants {
+	NSArray *constants = [self.store.constants allObjects];
+	for (GBTypedefEnumData *enumData in constants) {
+		GBLogInfo(@"Processing constants %@...", enumData);
+		self.currentContext = enumData;
+		[self processConstantsFromProvider:enumData.constants];
+		if (![self removeUndocumentedObject:enumData]) {
+			[self processCommentForObject:enumData];
+			[self validateCommentsForObjectAndMembers:enumData];
+			[self processHtmlReferencesForObject:enumData];
+		}
+		GBLogDebug(@"Finished processing constant %@.", enumData);
+	}
+}
+
 - (void)processDocuments {
 	for (GBDocumentData *document in self.store.documents) {
 		GBLogInfo(@"Processing static document %@...", document);
@@ -153,6 +170,19 @@
 			[self processHtmlReferencesForObject:method];
 		}
 		GBLogDebug(@"Finished processing method %@.", method);
+	}
+}
+
+- (void)processConstantsFromProvider:(GBEnumConstantProvider *)provider {
+	NSArray *constants = [provider.constants copy];
+	for (GBEnumConstantData *constant in constants) {
+		GBLogVerbose(@"Processing constant %@...", constant);
+		
+        //if (![self removeUndocumentedMember:method]) {
+        [self processCommentForObject:constant];
+        [self processHtmlReferencesForObject:constant];
+		//}
+		GBLogDebug(@"Finished processing method %@.", constant);
 	}
 }
 
@@ -262,21 +292,24 @@
 	if ([self isCommentValid:[(GBModelBase *)object comment]]) return NO;
 	
 	// Only remove if all methods are uncommented. Note that this also removes methods regardless of keepUndocumentedMembers setting, however if the object itself is commented, we'll keep methods.
-	GBMethodsProvider *provider = [(id<GBObjectDataProviding>)object methods];
-	BOOL hasCommentedMethods = NO;
-	for (GBMethodData *method in provider.methods) {
-		if ([self isCommentValid:method.comment]) {
-			hasCommentedMethods = YES;
-			break;
-		}
+	if([object conformsToProtocol:@protocol(GBObjectDataProviding)])
+    {
+        GBMethodsProvider *provider = [(id<GBObjectDataProviding>)object methods];
+        BOOL hasCommentedMethods = NO;
+        for (GBMethodData *method in provider.methods) {
+            if ([self isCommentValid:method.comment]) {
+                hasCommentedMethods = YES;
+                break;
+            }
+        }
+        // Remove the object if it only has uncommented methods.
+        if (!hasCommentedMethods) {
+            GBLogVerbose(@"Removing undocumented object %@...", object);
+            [self.store unregisterTopLevelObject:object];
+            return YES;
+        }
 	}
 	
-	// Remove the object if it only has uncommented methods.
-	if (!hasCommentedMethods) {
-		GBLogVerbose(@"Removing undocumented object %@...", object);
-		[self.store unregisterTopLevelObject:object];
-		return YES;
-	}
 	return NO;
 }
 
@@ -349,14 +382,16 @@
 		}
 		
 		// Merge all methods from category to the class. We can leave methods within the category as we'll delete it later on anyway.
-		if ([category.methods.methods count] > 0) {
+        GBMethodsProvider *classMethodProvider = class.methods;
+        classMethodProvider.useAlphabeticalOrder = !self.settings.useCodeOrder;
+        if ([category.methods.methods count] > 0) {
 			// If we should merge all section into a single section per category, create it now. Note that name is different whether this is category or extension.
 			if (!self.settings.keepMergedCategoriesSections) {
 				GBLogDebug(@"Creating single section for methods merged from %@...", category);
 				NSString *key = category.isExtension ? @"mergedExtensionSectionTitle" :  @"mergedCategorySectionTitle";
 				NSString *template = [self.settings.stringTemplates.objectPage objectForKey:key];
 				NSString *name = category.isExtension ? template : [NSString stringWithFormat:template, category.nameOfCategory];
-				[class.methods registerSectionWithName:name];
+				[classMethodProvider registerSectionWithName:name];
 			}
 			
 			// Merge all sections and all the methods, optionally create a separate section for each section from category.
@@ -366,15 +401,15 @@
 					if (self.settings.prefixMergedCategoriesSectionsWithCategoryName && !category.isExtension) {
 						NSString *template = [self.settings.stringTemplates.objectPage objectForKey:@"mergedPrefixedCategorySectionTitle"];
 						NSString *name = [NSString stringWithFormat:template, category.nameOfCategory, section.sectionName];
-						[class.methods registerSectionWithName:name];
+						[classMethodProvider registerSectionWithName:name];
 					} else {
-						[class.methods registerSectionWithName:section.sectionName];
+						[classMethodProvider registerSectionWithName:section.sectionName];
 					}
 				}
 				
 				for (GBMethodData *method in section.methods) {
 					GBLogDebug(@"Merging method %@ from %@...", method, category);
-					[class.methods registerMethod:method];
+					[classMethodProvider registerMethod:method];
 				}
 			}
 		}
@@ -390,7 +425,7 @@
 		}
 		
 		// Finally clean all empty sections and remove merged category from the store.
-		[class.methods unregisterEmptySections];
+		[classMethodProvider unregisterEmptySections];
 		[self.store unregisterTopLevelObject:category];
 	}
 }
@@ -404,11 +439,24 @@
 	if (![self isCommentValid:object.comment] && self.settings.warnOnUndocumentedObject) GBLogXWarn(object.prefferedSourceInfo, @"%@ is not documented!", object);
 	
 	// Handle methods.
-	for (GBMethodData *method in [[(id<GBObjectDataProviding>)object methods] methods]) {
-		if (![self isCommentValid:method.comment] && self.settings.warnOnUndocumentedMember) {
-			GBLogXWarn(method.prefferedSourceInfo, @"%@ is not documented!", method);
-		}
-	}
+    if([object conformsToProtocol:@protocol(GBObjectDataProviding)])
+    {
+        for (GBMethodData *method in [[(id<GBObjectDataProviding>)object methods] methods]) {
+            if (![self isCommentValid:method.comment] && self.settings.warnOnUndocumentedMember) {
+                GBLogXWarn(method.prefferedSourceInfo, @"%@ is not documented!", method);
+            }
+        }
+    }
+    
+    if([object isKindOfClass:[GBTypedefEnumData class]])
+    {
+        for(GBEnumConstantData *constant in ((GBTypedefEnumData *)object).constants.constants)
+        {
+            if (![self isCommentValid:constant.comment] && self.settings.warnOnUndocumentedMember) {
+                GBLogXWarn(constant.prefferedSourceInfo, @"%@ is not documented!", constant);
+            }
+        }
+    }
 }
 
 - (BOOL)isCommentValid:(GBComment *)comment {

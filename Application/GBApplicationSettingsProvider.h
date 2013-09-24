@@ -13,6 +13,24 @@
 
 extern id kGBCustomDocumentIndexDescKey;
 
+typedef enum
+{
+    GBHTMLAnchorFormatAppleDoc = 0,
+    GBHTMLAnchorFormatApple
+} GBHTMLAnchorFormat;
+
+GBHTMLAnchorFormat GBHTMLAnchorFormatFromNSString(NSString *formatString);
+NSString *NSStringFromGBHTMLAnchorFormat(GBHTMLAnchorFormat format);
+
+typedef enum
+{
+    GBPublishedFeedFormatAtom = 1 << 1,
+    GBPublishedFeedFormatXML = 1 << 2
+} GBPublishedFeedFormats;
+
+GBPublishedFeedFormats GBPublishedFeedFormatsFromNSString(NSString *formatString);
+NSString *NSStringFromGBPublishedFeedFormats(GBPublishedFeedFormats format);
+
 #pragma mark -
 
 /** Main application settings provider.
@@ -95,6 +113,18 @@ extern id kGBCustomDocumentIndexDescKey;
 /** Documentation set feed URL. */
 @property (copy) NSString *docsetFeedURL;
 
+/** Specifies the format docsets should be published in.
+ 
+ If `atom`, docset will be published using the standard Xcode atom feed format
+ 
+ If `xml`, docset will be published using the xml format specified by the xml-template.xml found in Templates/publish
+ 
+ Multiple values can be included in this parameter separated by a comma
+ 
+ @see publishDocSet
+ */
+@property (assign) GBPublishedFeedFormats docsetFeedFormats;
+
 /** Documentation set package URL. */
 @property (copy) NSString *docsetPackageURL;
 
@@ -122,6 +152,9 @@ extern id kGBCustomDocumentIndexDescKey;
 /** The name of the documentation set atom file when generating publishing files. The file is generated in `outputPath`. */
 @property (copy) NSString *docsetAtomFilename;
 
+/** The name of the documentation set xml file when generating publishing files. The file is generated in `outputPath`. */
+@property (copy) NSString *docsetXMLFilename;
+
 /** The name of the documentation set compressed package file when generating publishing files. The file is generated in `outputPath`. */
 @property (copy) NSString *docsetPackageFilename;
 
@@ -138,8 +171,8 @@ extern id kGBCustomDocumentIndexDescKey;
 /** The path to which documentation set is to be installed. */
 @property (copy) NSString *docsetInstallPath;
 
-/** The path to `docsetutil` tool, including tool filename. */
-@property (copy) NSString *docsetUtilPath;
+/** The path to `xcrun` tool, including tool filename. */
+@property (copy) NSString *xcrunPath;
 
 /** The list of all include paths containing static documentation.
  
@@ -212,6 +245,16 @@ extern id kGBCustomDocumentIndexDescKey;
  @see installDocSet
  */
 @property (assign) BOOL publishDocSet;
+
+/** Specifies the format docsets should use for their html anchors.
+ 
+ If `appledoc`, docset HTML files will use the format `//api/name/symbol_name` for anchor names.
+ 
+ If `apple`, docset HTML files will use the format `//apple_ref/occ/symbol_type/parent_symbol/symbol_name/`.
+ 
+ @see createDocSet
+ */
+@property (assign) GBHTMLAnchorFormat htmlAnchorFormat;
 
 /** Specifies whether intermediate files should be kept in `outputPath` or not.
  
@@ -328,7 +371,7 @@ extern id kGBCustomDocumentIndexDescKey;
 
 /** Indicates whether merged section names from categories should be prefixed with category name.
  
- If `YES`, all merged section names from categories are prefixed with category name to make them more easily identifiable. If `NO`, section names are not changed. The first option is useful in case end users of your code are aware of different categories (if you're writting a framework for example). On the other hand, if you're using categories mostly as a way to split class definition to multiple files, you might want to keep this option off.
+ If `YES`, all merged section names from categories are prefixed with category name to make them more easily identifiable. If `NO`, section names are not changed. The first option is useful in case end users of your code are aware of different categories (if you're writing a framework for example). On the other hand, if you're using categories mostly as a way to split class definition to multiple files, you might want to keep this option off.
  
  @warning *Note:* This option is ignored unless `mergeCategoriesToClasses` and `keepMergedCategoriesSections` is used. The option is also ignored for extensions; only section names are used for extensions!
  
@@ -336,6 +379,12 @@ extern id kGBCustomDocumentIndexDescKey;
  @see mergeCategoriesToClasses
  */
 @property (assign) BOOL prefixMergedCategoriesSectionsWithCategoryName;
+
+/** Indicates whether methods and properties keep the order specified in input files.
+
+ If `YES`, all method and properties will appear in the documentation in the same order they appear in the input files. If `NO`, the alphabetical order will be kept.
+ */
+@property (assign) BOOL useCodeOrder;
 
 /** Indicates whteher local methods and properties cross references texts should be prefixed when used in related items list.
  
@@ -618,6 +667,7 @@ extern id kGBCustomDocumentIndexDescKey;
  - `%VERSIONID`: Replaced by `versionIdentifier` value.
  - `%DOCSETBUNDLEFILENAME`: Replaced by `docsetBundleFilename` value.
  - `%DOCSETATOMFILENAME`: Replaced by `docsetAtomFilename` value.
+ - `%DOCSETXMLFILENAME`: Replaced by `docsetXMLFilename` value.
  - `%DOCSETPACKAGEFILENAME`: Replaced by `docsetPackageFilename` value.
  - `%YEAR`: Replaced by current year as four digit string.
  - `%UPDATEDATE`: Replaced by current date in the form of year, month and day with format `YYYY-MM-DD`. For example `2010-11-30`.
@@ -650,6 +700,7 @@ extern NSString *kGBTemplatePlaceholderCompany;
 extern NSString *kGBTemplatePlaceholderVersion;
 extern NSString *kGBTemplatePlaceholderDocSetBundleFilename;
 extern NSString *kGBTemplatePlaceholderDocSetAtomFilename;
+extern NSString *kGBTemplatePlaceholderDocSetXMLFilename;
 extern NSString *kGBTemplatePlaceholderDocSetPackageFilename;
 extern NSString *kGBTemplatePlaceholderYear;
 extern NSString *kGBTemplatePlaceholderUpdateDate;

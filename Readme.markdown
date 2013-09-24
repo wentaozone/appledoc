@@ -29,16 +29,17 @@ The recommended way is to clone GitHub project and compile the tool from Xcode. 
 
 This creates appledoc directory. Within you can find appledoc.xcodeproj Xcode project; open it and compile appledoc target - this should work out of the box, however your system must meet minimum system requirements, see below. I recommend you copy resulting appledoc executable from build directory to one of the directories in your path (`echo $PATH`) to make it easily accessible.
 
-Before running the tool, you need to copy all required template files from Templates subdirectory to one of the expected locations:
+Optional:
+Appledoc is selfcontained and contains the necessary template files. IF you want to modify these default  from Templates subdirectory to one of the expected locations:
 
 - ~/Library/Application Support/appledoc
 - ~/.appledoc
 
 You can also use install-appledoc.sh script to perform quick installation. Open Terminal and switch to appledoc directory. Type following command:
 
-	sudo sh install-appledoc.sh 
+	sudo sh install-appledoc.sh (if you need templates add '-t default')
 
-It compiles appledoc and installs its binary to /usr/local/bin and templatest to - ~/.appledoc by default. You can override this directories with -b and -t options respectively. For example:
+It compiles appledoc and installs its binary to /usr/local/bin and templates (if wanted) to ~/.appledoc by default. You can override this directories with -b and -t options respectively. For example:
 
 	sudo sh install-appledoc.sh -b /usr/bin -t ~/Library/Application\ Support/appledoc
 	
@@ -46,7 +47,7 @@ It compiles appledoc and installs its binary to /usr/local/bin and templatest to
 
     brew install appledoc
 
-Homebrew puts your templates in `~/Library/Application Support/appledoc`.
+Homebrew does not install templates by default.
 
 Using appledoc
 ==============
@@ -64,13 +65,27 @@ To keep up to date, just go to Terminal and cd into appledoc directory, issue `g
 
 If you also want to compile and run AppledocTests (unit tests) target, you need to copy all the frameworks indicated within Libraries & Frameworks group to shared frameworks directory before building unit tests target! This is not required for building the appledoc tool itself.
 
+Integrating with Xcode
+-----------------
+You can setup Xcode to automate appledoc document creation. [Find out how](https://github.com/tomaz/appledoc/blob/master/XcodeIntegrationScript.markdown) using a Run Script and your project's Build Phases.
+
+Docset usage tips
+-----------------
+
+Pre-generated documentation and docsets for most Cocoa frameworks are available at:  
+- [CocoaDocs](http://cocoadocs.org)
+
+Once you have a docset, you might want to use it with a documentation browser:  
+- [Xcode](https://developer.apple.com/xcode/)  
+- [Dash](http://kapeli.com/dash)
+
 Troubleshooting
 ---------------
 
 Have problems? This is what you can do to troubleshoot:
 
 1. Make sure you have the latest appledoc version. Try `git pull` and run with latest version again.
-2. Make sure you're using the latest templates - copy the files from appledoc project folder to one of the predefined folders (see Quick Install section above).
+2. IF you have template files installed, make sure you're using the latest - delete the predefined folders and have appledoc copy the files from its embedded archive again (see Quick Install section above).
 3. Increase verbosity level with `--verbose` command line switch. Default level is 2, but you can progressively increment verbosity up to 6 with each level giving you more detailed information. As this will give you a lot more information, you may want to concentrate only on specific set of source files you have problem with. Note that increasing verbosity will result in slower performance so using levels above 4 for every day use is not recommended.
 4. Appledoc is open source project! You have all the source code available, so run it from Xcode. You can setup Xcode to pass the desired command line arguments and add breakpoints to help you isolate your issue. If you feel you'd like to contribute more to community, you are welcome to fork the project on GitHub and add features to it. Keep us posted so we can add these features to main repository as well - include unit tests if possible.
 5. If you think you found a bug or want to request new feature, go to [appledoc issues page](https://github.com/tomaz/appledoc/issues). First read existing issues to see if there is already a request there (if you're using master branch, also read closed issues as your request may have already been covered but isn't yet merged on master branch). You can vote on existing requests to help us decide which features to concetrate on or you can add a comment to aid in solving it. If you don't find the request there, create a new issue; include parts of source files that give you problems if possible and/or description or steps that lead to it.
@@ -80,17 +95,16 @@ Have problems? This is what you can do to troubleshoot:
 Developer notes
 ---------------
 
-If you wish to contribute, see Developer Notes file for short overview of how appledoc works internally.
+If you wish to contribute, see the [Developer Notes file](https://github.com/tomaz/appledoc/blob/master/Developer%20Notes.markdown) for short overview of how appledoc works internally.
 
 
 Minimum system requirements
 ---------------------------
 
-- Xcode 3.2 or greater for compiling
-- OS X 10.6 for running
+- Xcode 4.5 or greater for compiling
+- OS X 10.7 for compiling and running
 
-
-LICENSE
+License
 =======
 
 appledoc is licensed with modified BSD license. In plain language: you're allowed to do whatever you wish with the code, modify, redistribute, embed in your products (free or commercial), but you must include copyright, terms of usage and disclaimer as stated in the license, the same way as any other BSD licensed code. You can of course use documentation generated by appledoc for your products (free or commercial), but you must attribute appledoc either in documentation itself or other appropriate place such as your website.

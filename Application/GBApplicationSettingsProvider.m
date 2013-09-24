@@ -22,11 +22,56 @@ NSString *kGBTemplatePlaceholderCompany = @"%COMPANY";
 NSString *kGBTemplatePlaceholderVersion = @"%VERSION";
 NSString *kGBTemplatePlaceholderDocSetBundleFilename = @"%DOCSETBUNDLEFILENAME";
 NSString *kGBTemplatePlaceholderDocSetAtomFilename = @"%DOCSETATOMFILENAME";
+NSString *kGBTemplatePlaceholderDocSetXMLFilename = @"%DOCSETXMLFILENAME";
 NSString *kGBTemplatePlaceholderDocSetPackageFilename = @"%DOCSETPACKAGEFILENAME";
 NSString *kGBTemplatePlaceholderYear = @"%YEAR";
 NSString *kGBTemplatePlaceholderUpdateDate = @"%UPDATEDATE";
 
 NSString *kGBCustomDocumentIndexDescKey = @"index-description";
+
+GBHTMLAnchorFormat GBHTMLAnchorFormatFromNSString(NSString *formatString) {
+    NSString *lowercaseFormatString = [formatString lowercaseString];
+    if ([lowercaseFormatString isEqualToString:@"apple"]) {
+        return GBHTMLAnchorFormatApple;
+    }
+    // We default to appledoc format if the option is not recognised
+    return GBHTMLAnchorFormatAppleDoc;
+}
+
+NSString *NSStringFromGBHTMLAnchorFormat(GBHTMLAnchorFormat format) {
+    switch (format) {
+        case GBHTMLAnchorFormatAppleDoc:
+            return @"appledoc";
+        case GBHTMLAnchorFormatApple:
+            return @"apple";
+    }
+}
+
+GBPublishedFeedFormats GBPublishedFeedFormatsFromNSString(NSString *formatString) {
+    // These items are comma delimited
+    NSArray *formatItems = [[formatString lowercaseString] componentsSeparatedByString:@","];
+    GBPublishedFeedFormats formats = 0;
+    if ([formatItems containsObject:@"xml"]) {
+        formats = formats | GBPublishedFeedFormatXML;
+    }
+    if ([formatItems containsObject:@"atom"]) {
+        formats = formats | GBPublishedFeedFormatAtom;
+    }
+    return formats;
+}
+
+NSString *NSStringFromGBPublishedFeedFormats(GBPublishedFeedFormats formats) {
+    NSMutableArray *formatItems = [NSMutableArray array];
+    if(formats & GBPublishedFeedFormatAtom)
+    {
+        [formatItems addObject:@"atom"];
+    }
+    if(formats & GBPublishedFeedFormatXML)
+    {
+        [formatItems addObject:@"xml"];
+    }
+    return [formatItems componentsJoinedByString:@","];
+}
 
 #pragma mark -
 
@@ -69,10 +114,10 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 		self.outputPath = @"";
 		self.templatesPath = nil;
 		self.docsetInstallPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Developer/Shared/Documentation/DocSets"];
-		self.docsetUtilPath = @"/Developer/usr/bin/docsetutil";
-		if (![[NSFileManager defaultManager] fileExistsAtPath:self.docsetUtilPath]) {
+		self.xcrunPath = @"/usr/bin/xcrun";
+		if (![[NSFileManager defaultManager] fileExistsAtPath:self.xcrunPath]) {
 			NSString *xcodePath = [[NSWorkspace sharedWorkspace] fullPathForApplication:@"Xcode"];
-			self.docsetUtilPath = [xcodePath stringByAppendingPathComponent:@"Contents/Developer/usr/bin/docsetutil"];
+			self.xcrunPath = [xcodePath stringByAppendingPathComponent:@"Contents/Developer/usr/bin/xcrun"];
 		}
 		self.indexDescriptionPath = nil;
 		self.includePaths = [NSMutableSet set];
@@ -83,6 +128,7 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 		self.createDocSet = YES;
 		self.installDocSet = YES;
 		self.publishDocSet = NO;
+        self.htmlAnchorFormat = GBHTMLAnchorFormatAppleDoc;
 		self.repeatFirstParagraphForMemberDescription = YES;
 		self.preprocessHeaderDoc = NO;
 		self.printInformationBlockTitles = YES;
@@ -99,6 +145,7 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 		self.mergeCategoryCommentToClass = YES;
 		self.keepMergedCategoriesSections = NO;
 		self.prefixMergedCategoriesSectionsWithCategoryName = NO;
+        self.useCodeOrder = NO;
 		
 		self.prefixLocalMembersInRelatedItemsList = YES;
 		self.embedCrossReferencesWhenProcessingMarkdown = YES;
@@ -121,6 +168,7 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 		self.docsetFallbackURL = @"";
 		self.docsetFeedName = self.docsetBundleName;
 		self.docsetFeedURL = @"";
+        self.docsetFeedFormats = GBPublishedFeedFormatAtom;
 		self.docsetPackageURL = @"";
 		self.docsetMinimumXcodeVersion = @"3.0";
 		self.dashDocsetPlatformFamily = @"appledoc"; // this makes docset TOC usable from within Dash - http://kapeli.com/dash/
@@ -131,7 +179,8 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 		
 		self.docsetBundleFilename = [NSString stringWithFormat:@"%@.%@.docset", kGBTemplatePlaceholderCompanyID, kGBTemplatePlaceholderProjectID];
 		self.docsetAtomFilename = [NSString stringWithFormat:@"%@.%@.atom", kGBTemplatePlaceholderCompanyID, kGBTemplatePlaceholderProjectID];
-		self.docsetPackageFilename = [NSString stringWithFormat:@"%@.%@-%@.xar", kGBTemplatePlaceholderCompanyID, kGBTemplatePlaceholderProjectID, kGBTemplatePlaceholderVersionID];
+        self.docsetXMLFilename = [NSString stringWithFormat:@"%@.%@.xml", kGBTemplatePlaceholderCompanyID, kGBTemplatePlaceholderProjectID];
+		self.docsetPackageFilename = [NSString stringWithFormat:@"%@.%@-%@", kGBTemplatePlaceholderCompanyID, kGBTemplatePlaceholderProjectID, kGBTemplatePlaceholderVersionID];
 		
 		self.commentComponents = [GBCommentComponentsProvider provider];
 		self.stringTemplates = [GBApplicationStringsProvider provider];
@@ -148,6 +197,7 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 	// These need to be replaced first as they can be used in other settings!
 	self.docsetBundleFilename = [self stringByReplacingOccurencesOfPlaceholdersInString:self.docsetBundleFilename];
 	self.docsetAtomFilename = [self stringByReplacingOccurencesOfPlaceholdersInString:self.docsetAtomFilename];
+    self.docsetXMLFilename = [self stringByReplacingOccurencesOfPlaceholdersInString:self.docsetXMLFilename];
 	self.docsetPackageFilename = [self stringByReplacingOccurencesOfPlaceholdersInString:self.docsetPackageFilename];
 	// Handle the rest now.
 	self.docsetBundleIdentifier = [self stringByReplacingOccurencesOfPlaceholdersInString:self.docsetBundleIdentifier];
@@ -184,6 +234,8 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 	const char* input=[markdown cStringUsingEncoding:NSUTF8StringEncoding];
 	
 	if(input) {
+		// Using gfm_string doesn't properly handle > %class%, so reverting back to original implementation!
+		//MMIOT *document = gfm_string((char *)input, (int)strlen(input), 0);
 		MMIOT *document = mkd_string((char *)input, (int)strlen(input), 0);
 		mkd_compile(document, 0);
 		
@@ -373,7 +425,12 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 	NSParameterAssert(prefix != nil);
 	if ([member isKindOfClass:[GBMethodData class]]) {
 		GBMethodData *method = (GBMethodData *)member;
-		return [NSString stringWithFormat:@"%@//api/name/%@", prefix, method.methodSelector];
+        switch (htmlAnchorFormat) {
+            case GBHTMLAnchorFormatApple:
+                return [NSString stringWithFormat:@"%@//apple_ref/occ/%@/%@/%@", prefix, [method methodTypeString], [method parentObject], method.methodSelector];
+            case GBHTMLAnchorFormatAppleDoc:
+                return [NSString stringWithFormat:@"%@//api/name/%@", prefix, method.methodSelector];
+        }
 	}
 	return @"";
 }
@@ -460,6 +517,10 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 		basePath = @"Protocols";
 		name = [object nameOfProtocol];
 	}
+    else if ([object isKindOfClass:[GBTypedefEnumData class]]) {
+		basePath = @"Constants";
+		name = [object nameOfEnum];
+	}
 	else if ([object isKindOfClass:[GBDocumentData class]]) {
 		GBDocumentData *document = object;
 		
@@ -524,6 +585,7 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 	string = [string stringByReplacingOccurrencesOfString:kGBTemplatePlaceholderVersion withString:self.projectVersion];
 	string = [string stringByReplacingOccurrencesOfString:kGBTemplatePlaceholderDocSetBundleFilename withString:self.docsetBundleFilename];
 	string = [string stringByReplacingOccurrencesOfString:kGBTemplatePlaceholderDocSetAtomFilename withString:self.docsetAtomFilename];
+    string = [string stringByReplacingOccurrencesOfString:kGBTemplatePlaceholderDocSetXMLFilename withString:self.docsetXMLFilename];
 	string = [string stringByReplacingOccurrencesOfString:kGBTemplatePlaceholderDocSetPackageFilename withString:self.docsetPackageFilename];
 	string = [string stringByReplacingOccurrencesOfString:kGBTemplatePlaceholderYear withString:[self yearStringFromDate:[NSDate date]]];
 	string = [string stringByReplacingOccurrencesOfString:kGBTemplatePlaceholderUpdateDate withString:[self yearToDayStringFromDate:[NSDate date]]];
@@ -575,7 +637,7 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 
 @synthesize outputPath;
 @synthesize docsetInstallPath;
-@synthesize docsetUtilPath;
+@synthesize xcrunPath;
 @synthesize templatesPath;
 @synthesize includePaths;
 @synthesize indexDescriptionPath;
@@ -590,6 +652,7 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 @synthesize docsetFallbackURL;
 @synthesize docsetFeedName;
 @synthesize docsetFeedURL;
+@synthesize docsetFeedFormats;
 @synthesize docsetPackageURL;
 @synthesize docsetMinimumXcodeVersion;
 @synthesize dashDocsetPlatformFamily;
@@ -600,6 +663,7 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 
 @synthesize docsetBundleFilename;
 @synthesize docsetAtomFilename;
+@synthesize docsetXMLFilename;
 @synthesize docsetPackageFilename;
 
 @synthesize repeatFirstParagraphForMemberDescription;
@@ -614,6 +678,7 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 @synthesize mergeCategoryCommentToClass;
 @synthesize keepMergedCategoriesSections;
 @synthesize prefixMergedCategoriesSectionsWithCategoryName;
+@synthesize useCodeOrder;
 
 @synthesize prefixLocalMembersInRelatedItemsList;
 @synthesize embedCrossReferencesWhenProcessingMarkdown;
@@ -623,6 +688,7 @@ NSString *kGBCustomDocumentIndexDescKey = @"index-description";
 @synthesize createDocSet;
 @synthesize installDocSet;
 @synthesize publishDocSet;
+@synthesize htmlAnchorFormat;
 @synthesize keepIntermediateFiles;
 @synthesize cleanupOutputPathBeforeRunning;
 @synthesize treatDocSetIndexingErrorsAsFatals;
